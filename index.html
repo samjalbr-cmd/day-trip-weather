@@ -62,6 +62,7 @@
   .pref label b { color: var(--muted); font-weight: 500; }
   .pref input[type=range] { width: 100%; accent-color: var(--accent); }
   .pref .nums { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .pref select { border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 5px 6px; }
   .pref input[type=number] { width: 70px; border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 5px 8px; }
   /* ---- phones ---- */
   @media (max-width: 860px) {
@@ -121,10 +122,14 @@
         <div class="pref"><label for="w-temp">🌡️ Temperature <b id="w-temp-v"></b></label><input type="range" id="w-temp" min="0" max="3" step="0.25"></div>
         <div class="pref"><label for="w-wind">💨 Wind <b id="w-wind-v"></b></label><input type="range" id="w-wind" min="0" max="3" step="0.25"></div>
         <div class="pref"><label for="w-waves">🌊 Waves (beaches) <b id="w-waves-v"></b></label><input type="range" id="w-waves" min="0" max="3" step="0.25"></div>
+        <div class="pref"><label for="w-uv">🧴 UV index <b id="w-uv-v"></b></label><input type="range" id="w-uv" min="0" max="3" step="0.25"></div>
+        <div class="pref"><label>Time of day you'll be out</label>
+          <div class="nums"><select id="p-startHour"></select> to <select id="p-endHour"></select></div></div>
         <div class="pref"><label>Ideal high temp</label>
           <div class="nums"><input type="number" id="p-tMin" step="1"> to <input type="number" id="p-tMax" step="1"> °F</div></div>
         <div class="pref"><label>Wind is a problem above</label><div class="nums"><input type="number" id="p-maxWind" step="1"> mph</div></div>
         <div class="pref"><label>Waves are a problem above</label><div class="nums"><input type="number" id="p-maxWave" step="0.5"> ft</div></div>
+        <div class="pref"><label>UV is a problem above</label><div class="nums"><input type="number" id="p-maxUv" step="1" min="1" max="12"> UV</div></div>
       </div>
       <button class="ghost" id="resetPrefs" type="button">Reset to defaults</button>
     </details>
@@ -203,7 +208,7 @@ function wxInfo(code) {
 
 // ---------- scoring (0–100) ----------
 // Preferences: how much each factor matters (0 = ignore, 1 = normal, 3 = a lot) + what counts as ideal.
-const PREF_DEFAULTS = { rain: 3, clouds: 3, temp: 1, wind: 0.25, waves: 0.25, tMin: 80, tMax: 88, maxWind: 15, maxWave: 3 };
+const PREF_DEFAULTS = { rain: 3, clouds: 3, temp: 1, wind: 0.25, waves: 0.25, tMin: 80, tMax: 88, maxWind: 15, maxWave: 3, startHour: 9, endHour: 18, uv: 1, maxUv: 8 };
 let prefs = { ...PREF_DEFAULTS };
 try { Object.assign(prefs, JSON.parse(localStorage.getItem("prefs") || "{}")); } catch {}
 
@@ -219,7 +224,8 @@ function scoreDay(d) {
   if (d.hi > P.tMax) temp = Math.min((d.hi - P.tMax) * 1.5, 25);
   const wind = d.wind > P.maxWind ? Math.min((d.wind - P.maxWind) * 1.2, 15) : 0;
   const waves = d.wave != null && d.wave > P.maxWave ? Math.min((d.wave - P.maxWave) * 4, 30) : 0; // beaches only
-  const pen = rain * P.rain + clouds * P.clouds + temp * P.temp + wind * P.wind + waves * P.waves;
+  const uv = d.uv != null && d.uv > P.maxUv ? Math.min((d.uv - P.maxUv) * 5, 20) : 0;  // strong sun / sunburn risk
+  const pen = rain * P.rain + clouds * P.clouds + temp * P.temp + wind * P.wind + waves * P.waves + uv * P.uv;
   return Math.max(0, Math.min(100, Math.round(100 - pen)));
 }
 function band(s) {
@@ -425,37 +431,42 @@ async function addDriveTimes(home, places) {
 // ---------- weather ----------
 async function addWeather(places) {
   const daily = "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,uv_index_max";
-  const hourly = "precipitation_probability,cloud_cover,weather_code";
+  const hourly = "precipitation_probability,cloud_cover,weather_code,temperature_2m,wind_speed_10m,precipitation,uv_index";
   for (const group of chunk(places, 50)) {
     const lat = group.map(p => p.lat.toFixed(3)).join(","), lon = group.map(p => p.lon.toFixed(3)).join(",");
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=${daily}&hourly=${hourly}` +
       `&timezone=auto&forecast_days=7&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch`;
     let j = await fetchJSON(url, {}, 45000);
     if (!Array.isArray(j)) j = [j];
-    group.forEach((p, i) => {
-      const w = j[i], D = w.daily, H = w.hourly;
-      p.days = D.time.map((date, k) => {
-        // daytime = 9am–6pm local
-        const hrs = H.time.map((t, h) => [t, h]).filter(([t]) => t.startsWith(date) && +t.slice(11, 13) >= 9 && +t.slice(11, 13) <= 18).map(([, h]) => h);
-        const avg = key => hrs.length ? hrs.reduce((s, h) => s + (H[key][h] ?? 0), 0) / hrs.length : 0;
-        // Daytime conditions: the daily weather code is the worst hour of the whole day (often
-        // overnight), so build the label from 9am–6pm instead — worst rain/fog hour, else cloud cover.
-        const dayCloud = Math.round(avg("cloud_cover"));
-        const wetCodes = hrs.map(h => H.weather_code[h]).filter(c => c != null && c >= 45);
-        const dayCode = wetCodes.length ? Math.max(...wetCodes) : dayCloud < 20 ? 0 : dayCloud < 45 ? 1 : dayCloud < 75 ? 2 : 3;
-        const d = {
-          date, code: hrs.length ? dayCode : D.weather_code[k], hi: D.temperature_2m_max[k], lo: D.temperature_2m_min[k],
-          precip: D.precipitation_sum[k] ?? 0, rainMax: D.precipitation_probability_max[k] ?? 0,
-          wind: D.wind_speed_10m_max[k] ?? 0, uv: D.uv_index_max[k] ?? 0,
-          rainChance: Math.round(avg("precipitation_probability")), cloud: dayCloud,
-        };
-        const m = p.marine && p.marine[date];
-        d.wave = m ? m.wave : null; d.water = m ? m.water : null;
-        d.score = scoreDay(d);
-        return d;
-      });
-    });
+    group.forEach((p, i) => { p.wx = { D: j[i].daily, H: j[i].hourly }; p.days = buildDays(p); });
   }
+}
+// Summarise each day using only the hours you'll be out (Preferences → time of day).
+function buildDays(p) {
+  const { D, H } = p.wx, from = prefs.startHour, to = prefs.endHour;
+  return D.time.map((date, k) => {
+    const hrs = [];
+    H.time.forEach((t, h) => { const hr = +t.slice(11, 13); if (t.startsWith(date) && hr >= from && hr < to) hrs.push(h); });
+    const vals = key => hrs.map(h => H[key][h]).filter(v => v != null);
+    const avg = key => { const v = vals(key); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; };
+    const max = key => { const v = vals(key); return v.length ? Math.max(...v) : null; };
+    // The daily weather code is the worst hour of the whole day (often overnight), so build the
+    // label from your hours instead: worst rain/fog hour, else average cloud cover.
+    const cloud = Math.round(avg("cloud_cover"));
+    const wet = vals("weather_code").filter(c => c >= 45);
+    const code = !hrs.length ? D.weather_code[k] : wet.length ? Math.max(...wet) : cloud < 20 ? 0 : cloud < 45 ? 1 : cloud < 75 ? 2 : 3;
+    const d = {
+      date, code, lo: D.temperature_2m_min[k], uv: max("uv_index") ?? D.uv_index_max[k] ?? 0,
+      hi: max("temperature_2m") ?? D.temperature_2m_max[k],
+      wind: max("wind_speed_10m") ?? D.wind_speed_10m_max[k] ?? 0,
+      precip: hrs.length ? vals("precipitation").reduce((a, b) => a + b, 0) : D.precipitation_sum[k] ?? 0,
+      rainChance: Math.round(avg("precipitation_probability")), cloud,
+    };
+    const m = p.marine && p.marine[date];
+    d.wave = m ? m.wave : null; d.water = m ? m.water : null;
+    d.score = scoreDay(d);
+    return d;
+  });
 }
 
 // ---------- main flow ----------
@@ -587,14 +598,14 @@ function renderDays() {
 function wxBlock(d) {
   const [icon, text] = wxInfo(d.code);
   return `<div class="wx"><span class="big">${icon}</span> <b>${Math.round(d.hi)}°</b>/${Math.round(d.lo)}°<br>
-    <span class="meta">${text} · ${d.rainChance}% rain · ${Math.round(d.wind)} mph</span>${d.wave != null ? `<br>
+    <span class="meta">${text} · ${d.rainChance}% rain · ${Math.round(d.wind)} mph · UV ${Math.round(d.uv)}</span>${d.wave != null ? `<br>
     <span class="meta">🌊 ${d.wave.toFixed(1)} ft waves${d.water != null ? ` · ${Math.round(d.water)}° water` : ""}</span>` : ""}</div>`;
 }
 function render() {
   const i = state.dayIndex, home = state.homePlace, hd = home.days[i];
   const [hb, hc] = band(hd.score);
   $("homeCard").innerHTML = `<div class="score" style="background:${hc}">${hd.score}</div>
-    <div style="flex:1"><div class="name">At home: ${home.name}</div><div class="meta">${hb} day · UV ${Math.round(hd.uv)} · ${hd.precip.toFixed(2)}" rain expected</div></div>${wxBlock(hd)}`;
+    <div style="flex:1"><div class="name">At home: ${home.name}</div><div class="meta">${hb} day · ${hd.precip.toFixed(2)}" rain expected</div></div>${wxBlock(hd)}`;
 
   const sort = $("sortBy").value;
   const list = [...state.places].sort((a, b) => {
@@ -634,7 +645,7 @@ function render() {
   state.places.forEach(p => {
     const d = p.days[i], [bl, bc] = band(d.score), [icon, text] = wxInfo(d.code);
     p.marker = L.circleMarker([p.lat, p.lon], { radius: 7, color: "#fff", weight: 1.5, fillColor: col(bc), fillOpacity: 1 })
-      .bindPopup(`<b>${p.name}</b><br>${icon} ${text}, ${Math.round(d.hi)}°F<br>${d.rainChance}% daytime rain chance<br>${d.wave != null ? `🌊 ${d.wave.toFixed(1)} ft waves<br>` : ""}Score ${d.score} (${bl}) · ${fmtDrive(p.driveSec)}`)
+      .bindPopup(`<b>${p.name}</b><br>${icon} ${text}, ${Math.round(d.hi)}°F<br>${d.rainChance}% rain chance · UV ${Math.round(d.uv)}<br>${d.wave != null ? `🌊 ${d.wave.toFixed(1)} ft waves<br>` : ""}Score ${d.score} (${bl}) · ${fmtDrive(p.driveSec)}`)
       .addTo(markerLayer);
     pts.push([p.lat, p.lon]);
   });
@@ -642,7 +653,7 @@ function render() {
   setTimeout(() => map.invalidateSize(), 50);
 
   $("foot").innerHTML = `${state.mode === "beaches" ? "Beaches" : "Towns"}: ${state.source}.${state.mode === "beaches" ? " Waves &amp; water temp: Open-Meteo Marine; lake and river beaches are left out." : ""} Drive times: ${state.routed ? "OSRM road routing (no traffic)" : "estimated from distance (routing service unavailable)"}.
-    Weather: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>. Score is based on daytime (9am–6pm) rain chance, rain amount, storms, clouds, temperature and wind${state.mode === "beaches" ? ", plus waves" : ""}, weighted by your Preferences.`;
+    Weather: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>. Score is based on rain chance, rain amount, storms, clouds, temperature, wind and UV from ${hourLabel(prefs.startHour)} to ${hourLabel(prefs.endHour)}${state.mode === "beaches" ? ", plus waves" : ""}, weighted by your Preferences.`;
 }
 
 // ---------- location input ----------
@@ -674,16 +685,22 @@ $("maxHours").onchange = () => state.home && run(state.home);
 $("mode").onchange = () => state.home && run(state.home);
 
 // ---------- preferences panel ----------
-const WEIGHTS = ["rain", "clouds", "temp", "wind", "waves"], LIMITS = ["tMin", "tMax", "maxWind", "maxWave"];
+const WEIGHTS = ["rain", "clouds", "temp", "wind", "waves", "uv"], LIMITS = ["tMin", "tMax", "maxWind", "maxWave", "maxUv"];
+const hourLabel = h => h === 0 || h === 24 ? "midnight" : h === 12 ? "noon" : h < 12 ? h + "am" : (h - 12) + "pm";
+["startHour", "endHour"].forEach(k => {
+  const range = k === "startHour" ? [5, 21] : [7, 24];
+  for (let h = range[0]; h <= range[1]; h++) $("p-" + k).add(new Option(hourLabel(h), h));
+});
 const weightLabel = v => v == 0 ? "Ignore" : v < 0.75 ? "Low" : v <= 1.25 ? "Normal" : v <= 2 ? "High" : "Very high";
 function showPrefs() {
   WEIGHTS.forEach(k => { $("w-" + k).value = prefs[k]; $("w-" + k + "-v").textContent = weightLabel(prefs[k]); });
   LIMITS.forEach(k => $("p-" + k).value = prefs[k]);
+  $("p-startHour").value = prefs.startHour; $("p-endHour").value = prefs.endHour;
 }
 function rescoreAll() {
   try { localStorage.setItem("prefs", JSON.stringify(prefs)); } catch {}
   if (!state.homePlace) return;
-  [state.homePlace, ...state.places].forEach(p => p.days.forEach(d => d.score = scoreDay(d)));
+  [state.homePlace, ...state.places].forEach(p => { p.days = p.wx ? buildDays(p) : p.days; });
   if (state.grid) state.grid.cells.forEach(c => { if (c.days) c.scores = c.days.map(scoreDay); });
   render();
 }
@@ -697,6 +714,13 @@ LIMITS.forEach(k => $("p-" + k).addEventListener("change", e => {
   if (isNaN(v)) { e.target.value = prefs[k]; return; }
   prefs[k] = v;
   if (prefs.tMin > prefs.tMax) [prefs.tMin, prefs.tMax] = [prefs.tMax, prefs.tMin];
+  showPrefs(); rescoreSoon();
+}));
+["startHour", "endHour"].forEach(k => $("p-" + k).addEventListener("change", e => {
+  prefs[k] = +e.target.value;
+  if (prefs.endHour <= prefs.startHour) { // keep at least a 1-hour window
+    if (k === "startHour") prefs.endHour = Math.min(24, prefs.startHour + 1); else prefs.startHour = Math.max(5, prefs.endHour - 1);
+  }
   showPrefs(); rescoreSoon();
 }));
 $("resetPrefs").onclick = () => { prefs = { ...PREF_DEFAULTS }; showPrefs(); rescoreAll(); };
