@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Day Trip">
+<meta name="theme-color" content="#0b6bcb">
+<title>Day Trip Weather Finder</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1b1f24; --muted: #5f6b7a; --line: #e2e6eb;
+    --accent: #0b6bcb; --great: #1a9e5c; --good: #6bb83a; --fair: #e0a100; --poor: #d0453a;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111418; --card: #1a1f25; --ink: #e8ecf0; --muted: #98a4b3; --line: #2b323b; --accent: #4ea1ff; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--ink); }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: calc(20px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) calc(48px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button, input, select { font: inherit; color: inherit; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 9px 14px; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type=text] { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 9px 12px; min-width: 0; flex: 1 1 200px; }
+  label.inline { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+  #status { margin-top: 12px; color: var(--muted); min-height: 1.4em; }
+  #status.err { color: var(--poor); }
+  .days { display: flex; gap: 6px; flex-wrap: wrap; margin: 16px 0 12px; }
+  .days button { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+  .days button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 16px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  #map { height: 560px; border-radius: 12px; border: 1px solid var(--line); }
+  @media (max-width: 860px) { #map { height: 360px; } }
+  .home { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .list { display: flex; flex-direction: column; gap: 8px; max-height: 560px; overflow-y: auto; padding-right: 4px; }
+  .row { display: grid; grid-template-columns: 52px 1fr auto; gap: 12px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+  .row:hover { border-color: var(--accent); }
+  .score { width: 52px; height: 52px; border-radius: 10px; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 1.15rem; }
+  .name { font-weight: 600; }
+  .meta { color: var(--muted); font-size: .88rem; }
+  .wx { text-align: right; font-size: .9rem; white-space: nowrap; }
+  .wx .big { font-size: 1.4rem; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: .78rem; font-weight: 600; color: #fff; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: .82rem; color: var(--muted); }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; background: var(--c); vertical-align: -1px; }
+  a { color: var(--accent); }
+  .foot { color: var(--muted); font-size: .8rem; margin-top: 18px; }
+  .wx-grid { image-rendering: auto; filter: blur(6px); }
+  .prefs { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .prefs summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+  .prefgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 20px; margin: 12px 0; }
+  .pref label { display: flex; justify-content: space-between; font-size: .9rem; margin-bottom: 4px; }
+  .pref label b { color: var(--muted); font-weight: 500; }
+  .pref input[type=range] { width: 100%; accent-color: var(--accent); }
+  .pref .nums { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .pref input[type=number] { width: 70px; border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 5px 8px; }
+  /* ---- phones ---- */
+  @media (max-width: 860px) {
+    .grid > #map { order: -1; }                       /* map above the list */
+    .list { max-height: none; overflow: visible; padding-right: 0; }  /* no scroll-inside-scroll */
+  }
+  @media (max-width: 560px) {
+    h1 { font-size: 1.3rem; }
+    .wrap { padding-top: calc(14px + env(safe-area-inset-top, 0px)); }
+    .controls > button, .controls > input[type=text] { flex: 1 1 100%; }
+    .controls label.inline { flex: 1 1 40%; }
+    .controls label.inline select { flex: 1; }
+    input, select, button { font-size: 16px; }        /* stops iPhone zooming in on tap */
+    .pref input[type=number] { font-size: 16px; }
+    #map { height: 300px; }
+    .row { grid-template-columns: 46px 1fr; gap: 6px 10px; padding: 10px; }
+    .row .score, .home .score { width: 46px; height: 46px; font-size: 1.05rem; }
+    .row .wx { grid-column: 2; text-align: left; white-space: normal; }
+    .wx .big { font-size: 1.15rem; }
+    .home .wx { flex-basis: 100%; text-align: left; white-space: normal; }
+    .days { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+    .days button { flex: 0 0 auto; }
+    .toolbar { align-items: flex-start; }
+    .prefgrid { grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+    .pref label { font-size: .82rem; }
+  }
+  button, .row, .days button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>☀️ Day Trip Weather Finder</h1>
+  <p class="sub">Finds towns or beaches within driving range of you and ranks them by how good the weather looks that day.</p>
+
+  <div class="card">
+    <div class="controls">
+      <button id="geoBtn">📍 Use my location</button>
+      <input type="text" id="placeInput" placeholder="…or type a town (e.g. Jensen Beach, FL)">
+      <button class="ghost" id="searchBtn">Search</button>
+      <label class="inline">Find
+        <select id="mode">
+          <option value="towns">Towns</option>
+          <option value="beaches">Beaches only</option>
+        </select>
+      </label>
+      <label class="inline">Max drive
+        <select id="maxHours">
+          <option value="1">1 hr</option><option value="1.5">1.5 hr</option><option value="2">2 hr</option>
+          <option value="2.5">2.5 hr</option><option value="3">3 hr</option><option value="4" selected>4 hr</option>
+        </select>
+      </label>
+    </div>
+    <details class="prefs">
+      <summary>⚙️ Preferences</summary>
+      <div class="prefgrid">
+        <div class="pref"><label for="w-rain">🌧️ Rain &amp; storms <b id="w-rain-v"></b></label><input type="range" id="w-rain" min="0" max="3" step="0.25"></div>
+        <div class="pref"><label for="w-clouds">☁️ Clouds <b id="w-clouds-v"></b></label><input type="range" id="w-clouds" min="0" max="3" step="0.25"></div>
+        <div class="pref"><label for="w-temp">🌡️ Temperature <b id="w-temp-v"></b></label><input type="range" id="w-temp" min="0" max="3" step="0.25"></div>
+        <div class="pref"><label for="w-wind">💨 Wind <b id="w-wind-v"></b></label><input type="range" id="w-wind" min="0" max="3" step="0.25"></div>
+        <div class="pref"><label for="w-waves">🌊 Waves (beaches) <b id="w-waves-v"></b></label><input type="range" id="w-waves" min="0" max="3" step="0.25"></div>
+        <div class="pref"><label>Ideal high temp</label>
+          <div class="nums"><input type="number" id="p-tMin" step="1"> to <input type="number" id="p-tMax" step="1"> °F</div></div>
+        <div class="pref"><label>Wind is a problem above</label><div class="nums"><input type="number" id="p-maxWind" step="1"> mph</div></div>
+        <div class="pref"><label>Waves are a problem above</label><div class="nums"><input type="number" id="p-maxWave" step="0.5"> ft</div></div>
+      </div>
+      <button class="ghost" id="resetPrefs" type="button">Reset to defaults</button>
+    </details>
+    <div id="status">Pick your location to start.</div>
+  </div>
+
+  <div id="results" hidden>
+    <div class="days" id="days"></div>
+    <div class="grid">
+      <div>
+        <div class="card home" id="homeCard"></div>
+        <div class="toolbar">
+          <div class="legend">
+            <span style="--c:var(--great)">Great 80+</span><span style="--c:var(--good)">Good 65+</span>
+            <span style="--c:var(--fair)">Fair 50+</span><span style="--c:var(--poor)">Poor</span>
+          </div>
+          <label class="inline">Sort
+            <select id="sortBy">
+              <option value="score">Best weather</option>
+              <option value="value">Best weather per drive time</option>
+              <option value="drive">Shortest drive</option>
+            </select>
+          </label>
+        </div>
+        <div class="list" id="list"></div>
+      </div>
+      <div id="map"></div>
+    </div>
+    <div class="foot" id="foot"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const state = { home: null, places: [], dayIndex: 0, days: [], routed: false, source: "" };
+let map, markerLayer, gridLayer;
+
+function setStatus(msg, err = false) { $("status").textContent = msg; $("status").className = err ? "err" : ""; }
+
+// ---------- helpers ----------
+function haversineKm(a, b) {
+  const R = 6371, toR = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * toR, dLon = (b.lon - a.lon) * toR;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * toR) * Math.cos(b.lat * toR) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+function bearing(a, b) {
+  const toR = Math.PI / 180, y = Math.sin((b.lon - a.lon) * toR) * Math.cos(b.lat * toR);
+  const x = Math.cos(a.lat * toR) * Math.sin(b.lat * toR) - Math.sin(a.lat * toR) * Math.cos(b.lat * toR) * Math.cos((b.lon - a.lon) * toR);
+  return ["N","NE","E","SE","S","SW","W","NW"][Math.round(((Math.atan2(y, x) / toR + 360) % 360) / 45) % 8];
+}
+function fmtDrive(sec) { const m = Math.round(sec / 60); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} m`; }
+async function fetchJSON(url, opts = {}, timeoutMs = 30000) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try { const r = await fetch(url, { ...opts, signal: ctl.signal }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return await r.json(); }
+  finally { clearTimeout(t); }
+}
+const chunk = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
+
+// WMO weather codes
+function wxInfo(code) {
+  if (code === 0) return ["☀️", "Clear"];
+  if (code <= 2) return ["🌤️", "Partly cloudy"];
+  if (code === 3) return ["☁️", "Overcast"];
+  if (code === 45 || code === 48) return ["🌫️", "Fog"];
+  if (code >= 51 && code <= 57) return ["🌦️", "Drizzle"];
+  if (code >= 61 && code <= 67) return ["🌧️", "Rain"];
+  if (code >= 71 && code <= 77) return ["🌨️", "Snow"];
+  if (code >= 80 && code <= 82) return ["🌦️", "Showers"];
+  if (code >= 85 && code <= 86) return ["🌨️", "Snow showers"];
+  if (code >= 95) return ["⛈️", "Thunderstorms"];
+  return ["❔", "Unknown"];
+}
+
+// ---------- scoring (0–100) ----------
+// Preferences: how much each factor matters (0 = ignore, 1 = normal, 3 = a lot) + what counts as ideal.
+const PREF_DEFAULTS = { rain: 1, clouds: 1, temp: 1, wind: 1, waves: 1, tMin: 70, tMax: 88, maxWind: 15, maxWave: 3 };
+let prefs = { ...PREF_DEFAULTS };
+try { Object.assign(prefs, JSON.parse(localStorage.getItem("prefs") || "{}")); } catch {}
+
+function scoreDay(d) {
+  const P = prefs;
+  let rain = d.rainChance * 0.45 + Math.min(d.precip, 1) * 25;   // daytime rain chance + inches of rain
+  const c = d.code;                                               // storms / rain / fog from the weather code
+  if (c >= 95) rain += 20; else if ((c >= 61 && c <= 67) || (c >= 80 && c <= 82)) rain += 8;
+  else if (c >= 51 && c <= 57) rain += 4; else if (c >= 71 && c <= 86) rain += 10;
+  const clouds = Math.min(d.cloud * 0.2, 20) + (c === 45 || c === 48 ? 5 : 0);
+  let temp = 0;
+  if (d.hi < P.tMin) temp = Math.min((P.tMin - d.hi) * 1.5, 25);
+  if (d.hi > P.tMax) temp = Math.min((d.hi - P.tMax) * 1.5, 25);
+  const wind = d.wind > P.maxWind ? Math.min((d.wind - P.maxWind) * 1.2, 15) : 0;
+  const waves = d.wave != null && d.wave > P.maxWave ? Math.min((d.wave - P.maxWave) * 4, 30) : 0; // beaches only
+  const pen = rain * P.rain + clouds * P.clouds + temp * P.temp + wind * P.wind + waves * P.waves;
+  return Math.max(0, Math.min(100, Math.round(100 - pen)));
+}
+function band(s) {
+  if (s >= 80) return ["Great", "var(--great)"];
+  if (s >= 65) return ["Good", "var(--good)"];
+  if (s >= 50) return ["Fair", "var(--fair)"];
+  return ["Poor", "var(--poor)"];
+}
+
+// ---------- finding places ----------
+async function placesFromOverpass(home, radiusKm) {
+  const q = `[out:json][timeout:40];node["place"~"^(city|town)$"](around:${Math.round(radiusKm * 1000)},${home.lat},${home.lon});out body;`;
+  const endpoints = ["https://overpass-api.de/api/interpreter"];
+  for (const ep of endpoints) {
+    try {
+      const j = await fetchJSON(ep, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } }, 12000);
+      const out = j.elements.filter(e => e.tags && e.tags.name).map(e => ({
+        name: e.tags.name, lat: e.lat, lon: e.lon,
+        region: e.tags["is_in:state_code"] || e.tags["addr:state"] || "",
+        pop: parseInt(String(e.tags.population || "0").replace(/\D/g, "")) || 0,
+      }));
+      if (out.length) { state.source = "OpenStreetMap"; return out; }
+    } catch (e) { console.warn("Overpass failed", ep, e); }
+  }
+  return null;
+}
+async function placesFromCitiesJson(home, radiusKm) {
+  setStatus("Loading backup town list (first time only, ~4 MB)…");
+  const all = await fetchJSON("https://cdn.jsdelivr.net/npm/cities.json@1.1.50/cities.json", {}, 90000);
+  const dLat = radiusKm / 111, dLon = radiusKm / (111 * Math.cos(home.lat * Math.PI / 180));
+  state.source = "GeoNames (cities.json)";
+  return all.filter(c => Math.abs(c.lat - home.lat) < dLat && Math.abs(c.lng - home.lon) < dLon)
+            .map(c => ({ name: c.name, lat: +c.lat, lon: +c.lng, region: c.country === "US" ? c.admin1 : c.country, pop: 0 }));
+}
+// Spread picks across the map: one town per grid cell (biggest town, or the one nearest the cell center).
+function spreadOut(home, places, maxCount, startCellKm = 25) {
+  let cellKm = startCellKm, picked = [];
+  while (true) {
+    const cells = new Map();
+    for (const p of places) {
+      const ky = Math.floor((p.lat * 111) / cellKm), kx = Math.floor((p.lon * 111 * Math.cos(home.lat * Math.PI / 180)) / cellKm);
+      const key = ky + ":" + kx, cur = cells.get(key);
+      if (!cur || p.pop > cur.pop) cells.set(key, p);
+    }
+    picked = [...cells.values()];
+    if (picked.length <= maxCount) return picked;
+    cellKm *= 1.25;
+  }
+}
+
+// ---------- finding beaches ----------
+const JUNK_BEACH = /access|dog|^\d|\b(avenue|ave|street|st|lane|ln|way|drive|dr|road|rd)\b|yacht|club|resort|hotel|condo|feeding|^beach( area)?$|entrance|private|swim area|^waterfront$|springs?\b/i;
+async function beachesFromOverpass(home, radiusKm) {
+  const q = `[out:json][timeout:40];nwr["natural"="beach"]["name"](around:${Math.round(radiusKm * 1000)},${home.lat},${home.lon});out center tags;`;
+  try {
+    const j = await fetchJSON("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } }, 12000);
+    const out = j.elements.map(e => ({ name: e.tags.name, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, region: e.tags["addr:city"] || "" })).filter(b => b.lat != null);
+    if (out.length) { state.source = "OpenStreetMap"; return out; }
+  } catch (e) { console.warn("Overpass beaches failed", e); }
+  return null;
+}
+// Photon (OpenStreetMap search by Komoot): a "beach" search in each map tile around you.
+// Kept to ~12 requests and cached for a day, because Photon blocks heavy use.
+function cacheGet(key) { try { const v = JSON.parse(localStorage.getItem(key)); return v && Date.now() - v.t < 864e5 ? v.d : null; } catch { return null; } }
+function cacheSet(key, d) { try { localStorage.setItem(key, JSON.stringify({ t: Date.now(), d })); } catch {} }
+// Map tiles (~160 km squares) covering the search circle, as [west, south, east, north].
+function tilesAround(home, radiusKm) {
+  const kmLat = 111, kmLon = 111 * Math.cos(home.lat * Math.PI / 180), tiles = [];
+  const n = Math.max(2, Math.ceil((2 * radiusKm) / 160)), tile = (2 * radiusKm) / n;
+  for (let iy = 0; iy < n; iy++) for (let ix = 0; ix < n; ix++) {
+    const x0 = -radiusKm + ix * tile, y0 = -radiusKm + iy * tile;
+    // skip corner tiles that lie entirely outside the circle
+    const nx = Math.max(x0, Math.min(0, x0 + tile)), ny = Math.max(y0, Math.min(0, y0 + tile));
+    if (Math.hypot(nx, ny) > radiusKm) continue;
+    tiles.push([home.lon + x0 / kmLon, home.lat + y0 / kmLat, home.lon + (x0 + tile) / kmLon, home.lat + (y0 + tile) / kmLat].map(v => v.toFixed(3)));
+  }
+  return tiles;
+}
+async function beachesFromPhoton(home, radiusKm) {
+  const key = `beaches:${home.lat.toFixed(2)},${home.lon.toFixed(2)},${radiusKm}`, cached = cacheGet(key);
+  if (cached) { state.source = "OpenStreetMap (cached)"; return cached; }
+  const urls = tilesAround(home, radiusKm).map(b => `https://photon.komoot.io/api/?q=beach&bbox=${b.join(",")}&limit=50&osm_tag=natural:beach`);
+  const out = []; let done = 0, failed = 0;
+  const queue = [...urls];
+  async function worker() {
+    while (queue.length) {
+      const u = queue.shift();
+      try {
+        const j = await fetchJSON(u, {}, 15000);
+        for (const f of j.features || []) {
+          const pr = f.properties || {};
+          if (pr.name) out.push({ name: pr.name, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], region: pr.city || pr.state || "" });
+        }
+      } catch (e) { failed++; if (failed >= 3) queue.length = 0; } // service down: stop early
+      setStatus(`Searching for beaches… (${++done}/${urls.length})`);
+    }
+  }
+  await Promise.all([1, 2].map(worker));
+  if (failed >= Math.min(3, urls.length) || failed > urls.length / 2) return null; // service down
+  if (failed) { state.source = "OpenStreetMap via Photon (partial)"; return out; }       // don't cache partial results
+  state.source = "OpenStreetMap via Photon";
+  cacheSet(key, out);
+  return out;
+}
+// Nominatim (OpenStreetMap's own search). Its rules allow 1 request per second.
+async function beachesFromNominatim(home, radiusKm) {
+  const key = `beaches:${home.lat.toFixed(2)},${home.lon.toFixed(2)},${radiusKm}`;
+  const tiles = tilesAround(home, radiusKm), out = []; let failed = 0;
+  for (let i = 0; i < tiles.length; i++) {
+    const [w, s, e, n] = tiles[i];
+    setStatus(`Searching for beaches (backup source)… (${i + 1}/${tiles.length})`);
+    try {
+      const j = await fetchJSON(`https://nominatim.openstreetmap.org/search?q=beach&viewbox=${w},${n},${e},${s}&bounded=1&format=jsonv2&limit=40`, {}, 15000);
+      for (const r of j) if (r.name && r.type === "beach") out.push({ name: r.name, lat: +r.lat, lon: +r.lon, region: "" });
+    } catch (err) { if (++failed >= 3) return null; }
+    await new Promise(r => setTimeout(r, 1100));
+  }
+  if (failed > tiles.length / 2) return null;
+  state.source = "OpenStreetMap via Nominatim";
+  if (!failed) cacheSet(key, out);
+  return out;
+}
+// Last resort: coastal towns, found by checking which towns sit right next to the ocean.
+async function beachTownsFallback(home, radiusKm) {
+  let towns = await placesFromCitiesJson(home, radiusKm);
+  towns.forEach(t => t.km = haversineKm(home, t));
+  towns = spreadOut(home, towns.filter(t => t.km <= radiusKm), 150, 6);
+  setStatus(`Checking which of ${towns.length} towns are on the coast…`);
+  await addMarine(towns);
+  state.source = "towns near the coast (beach search services were unavailable, so some may be a few miles inland)";
+  return towns.filter(t => t.ocean && t.seaKm != null && t.seaKm < 22).map(t => ({ ...t, name: t.name + " beaches", pop: 1 }));
+}
+async function findBeaches(home, radiusKm) {
+  let raw = await beachesFromOverpass(home, radiusKm);
+  if (!raw) raw = await beachesFromPhoton(home, radiusKm);
+  if (!raw) raw = await beachesFromNominatim(home, radiusKm);
+  if (!raw) return beachTownsFallback(home, radiusKm);
+  raw = raw.filter(b => !JUNK_BEACH.test(b.name.trim()));
+  // de-duplicate: same beach mapped several times, or several pieces within ~1.5 km
+  const kept = [];
+  for (const b of raw) if (!kept.some(k => haversineKm(k, b) < 1.5)) kept.push(b);
+  // prefer proper names ("… Beach", "… Park") when thinning out
+  kept.forEach(b => b.pop = /beach|park/i.test(b.name) ? 2 : 1);
+  return kept;
+}
+// Waves + water temperature from Open-Meteo Marine. Inland (lake/river) points come back empty.
+async function fetchMarine(points) {
+  const res = [];
+  for (const group of chunk(points, 50)) {
+    const lat = group.map(p => p.lat.toFixed(3)).join(","), lon = group.map(p => p.lon.toFixed(3)).join(",");
+    let j = await fetchJSON(`https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}&daily=wave_height_max&hourly=sea_surface_temperature&timezone=auto&forecast_days=7&length_unit=imperial`, {}, 45000);
+    if (!Array.isArray(j)) j = [j];
+    group.forEach((p, i) => {
+      const D = j[i].daily, H = j[i].hourly, marine = {};
+      D.time.forEach((date, k) => {
+        const h = H.time.indexOf(date + "T13:00"), c = h >= 0 ? H.sea_surface_temperature[h] : null;
+        marine[date] = { wave: D.wave_height_max[k], water: c == null ? null : c * 9 / 5 + 32 };
+      });
+      res.push({ marine, ocean: D.wave_height_max.some(v => v != null), seaKm: haversineKm(p, { lat: j[i].latitude, lon: j[i].longitude }) });
+    });
+  }
+  return res;
+}
+async function addMarine(places, nudge = false) {
+  try {
+    const r = await fetchMarine(places);
+    places.forEach((p, i) => Object.assign(p, r[i]));
+    // The marine grid is coarse, so a beach right on the ocean can land in a "land" cell.
+    // Try points ~8 km N/S/E/W; if any is ocean, it's a coastal beach. If none, it's a lake/river beach.
+    const miss = nudge ? places.filter(p => !p.ocean) : [];
+    if (miss.length) {
+      const offs = [[0, 0.08], [0, -0.08], [0.07, 0], [-0.07, 0]];
+      const pts = miss.flatMap(p => offs.map(([dy, dx]) => ({ lat: p.lat + dy, lon: p.lon + dx })));
+      const r2 = await fetchMarine(pts);
+      miss.forEach((p, i) => {
+        const hit = r2.slice(i * 4, i * 4 + 4).find(x => x.ocean);
+        if (hit) { p.marine = hit.marine; p.ocean = true; }
+      });
+    }
+  } catch (e) { console.warn("Marine data failed", e); places.forEach(p => { p.marine = null; p.ocean = true; }); }
+}
+
+// ---------- drive times ----------
+async function addDriveTimes(home, places) {
+  state.routed = true;
+  for (const group of chunk(places, 80)) {
+    const coords = [home, ...group].map(p => `${p.lon.toFixed(5)},${p.lat.toFixed(5)}`).join(";");
+    try {
+      const j = await fetchJSON(`https://router.project-osrm.org/table/v1/driving/${coords}?sources=0&annotations=duration,distance`);
+      group.forEach((p, i) => {
+        // Drop places the router had to snap far away (islands, no road access)
+        const snapM = j.destinations[i + 1] ? j.destinations[i + 1].distance : 0;
+        p.driveSec = snapM > 5000 ? null : j.durations[0][i + 1];
+        p.driveKm = j.distances ? j.distances[0][i + 1] / 1000 : null;
+      });
+    } catch (e) {
+      console.warn("Routing failed; estimating", e); state.routed = false;
+      group.forEach(p => { p.driveKm = p.km * 1.3; p.driveSec = (p.driveKm / 80) * 3600; });
+    }
+  }
+}
+
+// ---------- weather ----------
+async function addWeather(places) {
+  const daily = "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,uv_index_max";
+  const hourly = "precipitation_probability,cloud_cover";
+  for (const group of chunk(places, 50)) {
+    const lat = group.map(p => p.lat.toFixed(3)).join(","), lon = group.map(p => p.lon.toFixed(3)).join(",");
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=${daily}&hourly=${hourly}` +
+      `&timezone=auto&forecast_days=7&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch`;
+    let j = await fetchJSON(url, {}, 45000);
+    if (!Array.isArray(j)) j = [j];
+    group.forEach((p, i) => {
+      const w = j[i], D = w.daily, H = w.hourly;
+      p.days = D.time.map((date, k) => {
+        // daytime = 9am–6pm local
+        const hrs = H.time.map((t, h) => [t, h]).filter(([t]) => t.startsWith(date) && +t.slice(11, 13) >= 9 && +t.slice(11, 13) <= 18).map(([, h]) => h);
+        const avg = key => hrs.length ? hrs.reduce((s, h) => s + (H[key][h] ?? 0), 0) / hrs.length : 0;
+        const d = {
+          date, code: D.weather_code[k], hi: D.temperature_2m_max[k], lo: D.temperature_2m_min[k],
+          precip: D.precipitation_sum[k] ?? 0, rainMax: D.precipitation_probability_max[k] ?? 0,
+          wind: D.wind_speed_10m_max[k] ?? 0, uv: D.uv_index_max[k] ?? 0,
+          rainChance: Math.round(avg("precipitation_probability")), cloud: Math.round(avg("cloud_cover")),
+        };
+        const m = p.marine && p.marine[date];
+        d.wave = m ? m.wave : null; d.water = m ? m.water : null;
+        d.score = scoreDay(d);
+        return d;
+      });
+    });
+  }
+}
+
+// ---------- main flow ----------
+async function run(home) {
+  const maxHours = +$("maxHours").value;
+  state.home = home; $("geoBtn").disabled = true; $("searchBtn").disabled = true;
+  try {
+    const radiusKm = Math.min(maxHours * 95, 420); // straight-line reach; roads are slower, routing trims the rest
+    state.radiusKm = radiusKm;
+    const beaches = $("mode").value === "beaches", noun = beaches ? "beaches" : "towns";
+    state.mode = beaches ? "beaches" : "towns";
+    setStatus(`Finding ${noun} near ${home.name}…`);
+    let raw;
+    if (beaches) raw = await findBeaches(home, radiusKm);
+    else { raw = await placesFromOverpass(home, radiusKm); if (!raw) raw = await placesFromCitiesJson(home, radiusKm); }
+    raw.forEach(p => p.km = haversineKm(home, p));
+    raw = raw.filter(p => p.km > (beaches ? 0.5 : 8) && p.km <= radiusKm);
+    if (!raw.length) throw new Error(`No ${noun} found nearby.`);
+    // beaches sit close together along the coast, so start with a finer grid
+    let places = spreadOut(home, raw, beaches ? 90 : 110, beaches ? 5 : 25);
+
+    setStatus(`Getting drive times for ${places.length} ${noun}…`);
+    await addDriveTimes(home, places);
+    places = places.filter(p => p.driveSec != null && p.driveSec <= maxHours * 3600);
+
+    const homePlace = { ...home, km: 0, driveSec: 0 };
+    if (beaches) {
+      setStatus(`Getting surf conditions for ${places.length} beaches…`);
+      await addMarine([homePlace, ...places], true);
+      places = places.filter(p => p.ocean); // drop lake & river beaches
+      if (!places.length) throw new Error("No ocean beaches found within range.");
+    }
+
+    setStatus(`Getting forecasts for ${places.length} ${noun}…`);
+    await addWeather([homePlace, ...places]);
+    state.homePlace = homePlace; state.places = places;
+    state.days = homePlace.days.map(d => d.date);
+    state.dayIndex = new Date().getHours() >= 17 && state.days.length > 1 ? 1 : 0;
+    setStatus(`Checked ${places.length} ${noun} within ${maxHours} hours of ${home.name}.`);
+    $("results").hidden = false;
+    renderDays(); render();
+    await updateMapView(); // shaded weather layer under the dots
+  } catch (e) {
+    console.error(e);
+    if (/429/.test(e.message)) setStatus("The free weather/map services are busy (too many searches in a short time). Wait a minute and try again.", true);
+    else setStatus("Something went wrong: " + e.message.replace(/\.$/, "") + ". Try again in a moment.", true);
+  } finally { $("geoBtn").disabled = false; $("searchBtn").disabled = false; }
+}
+
+// ---------- filled weather map ----------
+// Weather is sampled on a regular grid (~40 km apart) covering the whole drive radius,
+// scored the same way as places (minus surf), then painted as a smooth color layer.
+const SCORE_STOPS = [[35, [208, 69, 58]], [55, [224, 161, 0]], [70, [107, 184, 58]], [85, [26, 158, 92]]];
+function scoreRGB(sc) {
+  if (sc <= SCORE_STOPS[0][0]) return SCORE_STOPS[0][1];
+  for (let k = 1; k < SCORE_STOPS.length; k++) {
+    const [s1, c1] = SCORE_STOPS[k], [s0, c0] = SCORE_STOPS[k - 1];
+    if (sc <= s1) { const t = (sc - s0) / (s1 - s0); return c0.map((v, j) => Math.round(v + (c1[j] - v) * t)); }
+  }
+  return SCORE_STOPS[SCORE_STOPS.length - 1][1];
+}
+async function ensureGrid() {
+  const home = state.home, R = state.radiusKm, key = `${home.lat},${home.lon},${R}`;
+  if (state.grid && state.grid.key === key) return state.grid;
+  const stepKm = 40, kmLon = 111 * Math.cos(home.lat * Math.PI / 180);
+  const n = Math.ceil(R / stepKm), dLat = stepKm / 111, dLon = stepKm / kmLon, size = 2 * n + 1;
+  const cells = [];
+  for (let iy = 0; iy < size; iy++) for (let ix = 0; ix < size; ix++) {
+    const dy = (n - iy) * stepKm, dx = (ix - n) * stepKm; // row 0 = north
+    if (Math.hypot(dx, dy) > R + stepKm) continue;
+    cells.push({ ix, iy, lat: home.lat + dy / 111, lon: home.lon + dx / kmLon });
+  }
+  const daily = "weather_code,temperature_2m_max,precipitation_sum,precipitation_probability_mean,cloud_cover_mean,wind_speed_10m_max";
+  let done = 0;
+  for (const group of chunk(cells, 100)) {
+    setStatus(`Building weather map… (${done}/${cells.length} points)`);
+    const lat = group.map(c => c.lat.toFixed(2)).join(","), lon = group.map(c => c.lon.toFixed(2)).join(",");
+    let j = await fetchJSON(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=${daily}&timezone=auto&forecast_days=7&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch`, {}, 60000);
+    if (!Array.isArray(j)) j = [j];
+    group.forEach((c, k) => {
+      const D = j[k].daily;
+      c.days = D.time.map((_, t) => ({
+        code: D.weather_code[t], hi: D.temperature_2m_max[t], precip: D.precipitation_sum[t] ?? 0,
+        rainChance: D.precipitation_probability_mean[t] ?? 0, cloud: D.cloud_cover_mean[t] ?? 0, wind: D.wind_speed_10m_max[t] ?? 0,
+      }));
+      c.scores = c.days.map(scoreDay);
+    });
+    done += group.length;
+  }
+  state.grid = { key, cells, size, n, dLat, dLon, center: { lat: home.lat, lon: home.lon }, R, stepKm };
+  return state.grid;
+}
+function drawGrid(dayIndex) {
+  if (gridLayer) { gridLayer.remove(); gridLayer = null; }
+  const g = state.grid;
+  if (!g || g.key !== `${state.home.lat},${state.home.lon},${state.radiusKm}`) return;
+  // one pixel per grid point; the browser smooths it when stretched over the map
+  const cv = document.createElement("canvas"); cv.width = cv.height = g.size;
+  const ctx = cv.getContext("2d"), img = ctx.createImageData(g.size, g.size);
+  for (const c of g.cells) {
+    const sc = c.scores[dayIndex]; if (sc == null) continue;
+    const [r, gg, b] = scoreRGB(sc), o = (c.iy * g.size + c.ix) * 4;
+    const dist = Math.hypot((c.ix - g.n) * g.stepKm, (g.n - c.iy) * g.stepKm);
+    img.data.set([r, gg, b, dist > g.R ? 90 : 255], o); // fade the edge past the drive radius
+  }
+  ctx.putImageData(img, 0, 0);
+  const half = g.n + 0.5;
+  const bounds = [[g.center.lat - half * g.dLat, g.center.lon - half * g.dLon], [g.center.lat + half * g.dLat, g.center.lon + half * g.dLon]];
+  gridLayer = L.imageOverlay(cv.toDataURL(), bounds, { opacity: 0.3, className: "wx-grid", interactive: false }).addTo(map);
+}
+async function updateMapView() {
+  if (!state.places.length) return;
+  const prev = $("status").textContent;
+  try { await ensureGrid(); setStatus(prev); render(); }
+  catch (e) { console.error(e); setStatus(prev + " (Couldn't load the weather shading: " + e.message + ")"); }
+}
+
+// ---------- rendering ----------
+function renderDays() {
+  $("days").innerHTML = "";
+  state.days.forEach((date, i) => {
+    const d = new Date(date + "T12:00:00");
+    const label = i === 0 ? "Today" : i === 1 ? "Tomorrow" : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    const b = document.createElement("button"); b.textContent = label; b.className = i === state.dayIndex ? "on" : "";
+    b.onclick = () => { state.dayIndex = i; renderDays(); render(); };
+    $("days").appendChild(b);
+  });
+}
+function wxBlock(d) {
+  const [icon, text] = wxInfo(d.code);
+  return `<div class="wx"><span class="big">${icon}</span> <b>${Math.round(d.hi)}°</b>/${Math.round(d.lo)}°<br>
+    <span class="meta">${text} · ${d.rainChance}% rain · ${Math.round(d.wind)} mph</span>${d.wave != null ? `<br>
+    <span class="meta">🌊 ${d.wave.toFixed(1)} ft waves${d.water != null ? ` · ${Math.round(d.water)}° water` : ""}</span>` : ""}</div>`;
+}
+function render() {
+  const i = state.dayIndex, home = state.homePlace, hd = home.days[i];
+  const [hb, hc] = band(hd.score);
+  $("homeCard").innerHTML = `<div class="score" style="background:${hc}">${hd.score}</div>
+    <div style="flex:1"><div class="name">At home: ${home.name}</div><div class="meta">${hb} day · UV ${Math.round(hd.uv)} · ${hd.precip.toFixed(2)}" rain expected</div></div>${wxBlock(hd)}`;
+
+  const sort = $("sortBy").value;
+  const list = [...state.places].sort((a, b) => {
+    if (sort === "drive") return a.driveSec - b.driveSec;
+    if (sort === "value") return (b.days[i].score - 0.15 * b.driveSec / 60) - (a.days[i].score - 0.15 * a.driveSec / 60);
+    return b.days[i].score - a.days[i].score || a.driveSec - b.driveSec;
+  });
+
+  $("list").innerHTML = "";
+  list.forEach(p => {
+    const d = p.days[i], [bl, bc] = band(d.score), better = d.score - hd.score;
+    const row = document.createElement("div"); row.className = "row";
+    const dir = `https://www.google.com/maps/dir/?api=1&origin=${home.lat},${home.lon}&destination=${p.lat},${p.lon}`;
+    row.innerHTML = `<div class="score" style="background:${bc}">${d.score}</div>
+      <div><div class="name">${p.name}${p.region ? `, <span class="meta">${p.region}</span>` : ""}</div>
+      <div class="meta">🚗 ${state.routed ? "" : "~"}${fmtDrive(p.driveSec)} ${bearing(home, p)} · ${Math.round((p.driveKm ?? p.km) * 0.621)} mi
+        ${better > 0 ? ` · <span style="color:var(--great)">+${better} vs home</span>` : ""} · <a href="${dir}" target="_blank" rel="noopener">Directions</a></div></div>
+      ${wxBlock(d)}`;
+    row.onclick = e => {
+      if (e.target.tagName === "A") return;
+      map.setView([p.lat, p.lon], 10); p.marker.openPopup();
+      if (window.innerWidth <= 860) $("map").scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    $("list").appendChild(row);
+  });
+
+  if (!map) {
+    map = L.map("map");
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
+  }
+  drawGrid(i);
+  if (markerLayer) markerLayer.remove();
+  markerLayer = L.layerGroup().addTo(map);
+  const css = getComputedStyle(document.documentElement), col = v => css.getPropertyValue(v.slice(4, -1)).trim();
+  L.circleMarker([home.lat, home.lon], { radius: 9, color: "#000", weight: 2, fillColor: "#fff", fillOpacity: 1 }).bindPopup("<b>You</b>").addTo(markerLayer);
+  const pts = [[home.lat, home.lon]];
+  state.places.forEach(p => {
+    const d = p.days[i], [bl, bc] = band(d.score), [icon, text] = wxInfo(d.code);
+    p.marker = L.circleMarker([p.lat, p.lon], { radius: 7, color: "#fff", weight: 1.5, fillColor: col(bc), fillOpacity: 1 })
+      .bindPopup(`<b>${p.name}</b><br>${icon} ${text}, ${Math.round(d.hi)}°F<br>${d.rainChance}% daytime rain chance<br>${d.wave != null ? `🌊 ${d.wave.toFixed(1)} ft waves<br>` : ""}Score ${d.score} (${bl}) · ${fmtDrive(p.driveSec)}`)
+      .addTo(markerLayer);
+    pts.push([p.lat, p.lon]);
+  });
+  if (state.fittedFor !== state.places) { map.fitBounds(pts, { padding: [20, 20] }); state.fittedFor = state.places; } // only re-zoom after a new search
+  setTimeout(() => map.invalidateSize(), 50);
+
+  $("foot").innerHTML = `${state.mode === "beaches" ? "Beaches" : "Towns"}: ${state.source}.${state.mode === "beaches" ? " Waves &amp; water temp: Open-Meteo Marine; lake and river beaches are left out." : ""} Drive times: ${state.routed ? "OSRM road routing (no traffic)" : "estimated from distance (routing service unavailable)"}.
+    Weather: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>. Score is based on daytime (9am–6pm) rain chance, rain amount, storms, clouds, temperature and wind${state.mode === "beaches" ? ", plus waves" : ""}, weighted by your Preferences.`;
+}
+
+// ---------- location input ----------
+$("geoBtn").onclick = () => {
+  if (!navigator.geolocation) return setStatus("Your browser doesn't support location. Type a town instead.", true);
+  setStatus("Getting your location…");
+  navigator.geolocation.getCurrentPosition(
+    pos => run({ name: "your location", lat: pos.coords.latitude, lon: pos.coords.longitude }),
+    err => setStatus("Couldn't get your location (" + err.message + "). Type a town instead.", true),
+    { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 }
+  );
+};
+async function search() {
+  const q = $("placeInput").value.trim(); if (!q) return;
+  setStatus("Looking up " + q + "…");
+  try {
+    const name = q.split(",")[0].trim();
+    const j = await fetchJSON(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=10&language=en&format=json`);
+    if (!j.results || !j.results.length) return setStatus("Couldn't find " + q + ".", true);
+    const hint = (q.split(",")[1] || "").trim().toLowerCase();
+    const r = j.results.find(r => hint && ((r.admin1 || "").toLowerCase().startsWith(hint) || (r.admin1_code || "").toLowerCase() === hint || (r.country_code || "").toLowerCase() === hint)) || j.results[0];
+    run({ name: [r.name, r.admin1].filter(Boolean).join(", "), lat: r.latitude, lon: r.longitude });
+  } catch (e) { setStatus("Lookup failed: " + e.message, true); }
+}
+$("searchBtn").onclick = search;
+$("placeInput").addEventListener("keydown", e => { if (e.key === "Enter") search(); });
+$("sortBy").onchange = () => state.places.length && render();
+$("maxHours").onchange = () => state.home && run(state.home);
+$("mode").onchange = () => state.home && run(state.home);
+
+// ---------- preferences panel ----------
+const WEIGHTS = ["rain", "clouds", "temp", "wind", "waves"], LIMITS = ["tMin", "tMax", "maxWind", "maxWave"];
+const weightLabel = v => v == 0 ? "Ignore" : v < 0.75 ? "Low" : v <= 1.25 ? "Normal" : v <= 2 ? "High" : "Very high";
+function showPrefs() {
+  WEIGHTS.forEach(k => { $("w-" + k).value = prefs[k]; $("w-" + k + "-v").textContent = weightLabel(prefs[k]); });
+  LIMITS.forEach(k => $("p-" + k).value = prefs[k]);
+}
+function rescoreAll() {
+  try { localStorage.setItem("prefs", JSON.stringify(prefs)); } catch {}
+  if (!state.homePlace) return;
+  [state.homePlace, ...state.places].forEach(p => p.days.forEach(d => d.score = scoreDay(d)));
+  if (state.grid) state.grid.cells.forEach(c => { if (c.days) c.scores = c.days.map(scoreDay); });
+  render();
+}
+let rescoreTimer;
+const rescoreSoon = () => { clearTimeout(rescoreTimer); rescoreTimer = setTimeout(rescoreAll, 120); };
+WEIGHTS.forEach(k => $("w-" + k).addEventListener("input", e => {
+  prefs[k] = +e.target.value; $("w-" + k + "-v").textContent = weightLabel(prefs[k]); rescoreSoon();
+}));
+LIMITS.forEach(k => $("p-" + k).addEventListener("change", e => {
+  const v = parseFloat(e.target.value);
+  if (isNaN(v)) { e.target.value = prefs[k]; return; }
+  prefs[k] = v;
+  if (prefs.tMin > prefs.tMax) [prefs.tMin, prefs.tMax] = [prefs.tMax, prefs.tMin];
+  showPrefs(); rescoreSoon();
+}));
+$("resetPrefs").onclick = () => { prefs = { ...PREF_DEFAULTS }; showPrefs(); rescoreAll(); };
+showPrefs();
+</script>
+</body>
+</html>
