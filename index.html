@@ -474,7 +474,7 @@ function buildDays(p) {
 // ---------- main flow ----------
 async function run(home) {
   const maxHours = +$("maxHours").value;
-  state.home = home; $("geoBtn").disabled = true; $("searchBtn").disabled = true;
+  state.home = home; saveSettings(); $("geoBtn").disabled = true; $("searchBtn").disabled = true;
   try {
     const radiusKm = Math.min(maxHours * 95, 420); // straight-line reach; roads are slower, routing trims the rest
     state.radiusKm = radiusKm;
@@ -533,6 +533,13 @@ function scoreRGB(sc) {
 async function ensureGrid() {
   const home = state.home, R = state.radiusKm, key = `${home.lat},${home.lon},${R}`;
   if (state.grid && state.grid.key === key) return state.grid;
+  try { // reuse shading from the last 2 hours (it's ~350 forecasts, the heaviest request)
+    const c = JSON.parse(localStorage.getItem("grid") || "null");
+    if (c && c.key === key && Date.now() - c.t < 2 * 3600e3) {
+      c.cells.forEach(cell => cell.scores = cell.days.map(scoreDay));
+      return (state.grid = c);
+    }
+  } catch {}
   const stepKm = 40, kmLon = 111 * Math.cos(home.lat * Math.PI / 180);
   const n = Math.ceil(R / stepKm), dLat = stepKm / 111, dLon = stepKm / kmLon, size = 2 * n + 1;
   const cells = [];
@@ -558,7 +565,8 @@ async function ensureGrid() {
     });
     done += group.length;
   }
-  state.grid = { key, cells, size, n, dLat, dLon, center: { lat: home.lat, lon: home.lon }, R, stepKm };
+  state.grid = { key, cells, size, n, dLat, dLon, center: { lat: home.lat, lon: home.lon }, R, stepKm, t: Date.now() };
+  try { localStorage.setItem("grid", JSON.stringify(state.grid)); } catch {}
   return state.grid;
 }
 function drawGrid(dayIndex) {
@@ -663,7 +671,7 @@ $("geoBtn").onclick = () => {
   if (!navigator.geolocation) return setStatus("Your browser doesn't support location. Type a town instead.", true);
   setStatus("Getting your location…");
   navigator.geolocation.getCurrentPosition(
-    pos => run({ name: "your location", lat: pos.coords.latitude, lon: pos.coords.longitude }),
+    pos => run({ name: "your location", lat: pos.coords.latitude, lon: pos.coords.longitude, gps: true }),
     err => setStatus("Couldn't get your location (" + err.message + "). Type a town instead.", true),
     { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 }
   );
@@ -682,9 +690,38 @@ async function search() {
 }
 $("searchBtn").onclick = search;
 $("placeInput").addEventListener("keydown", e => { if (e.key === "Enter") search(); });
-$("sortBy").onchange = () => state.places.length && render();
-$("maxHours").onchange = () => state.home && run(state.home);
-$("mode").onchange = () => state.home && run(state.home);
+$("sortBy").onchange = () => { saveSettings(); state.places.length && render(); };
+$("maxHours").onchange = () => { saveSettings(); state.home && run(state.home); };
+$("mode").onchange = () => { saveSettings(); state.home && run(state.home); };
+
+// ---------- remember location + choices between visits ----------
+function saveSettings() {
+  try {
+    localStorage.setItem("settings", JSON.stringify({
+      home: state.home, mode: $("mode").value, maxHours: $("maxHours").value, sort: $("sortBy").value,
+    }));
+  } catch {}
+}
+function restoreSettings() {
+  let saved; try { saved = JSON.parse(localStorage.getItem("settings") || "null"); } catch {}
+  if (!saved) return;
+  const setSel = (id, v) => { if (v != null && [...$(id).options].some(o => o.value === String(v))) $(id).value = v; };
+  setSel("mode", saved.mode); setSel("maxHours", saved.maxHours); setSel("sortBy", saved.sort);
+  const h = saved.home;
+  if (!h || typeof h.lat !== "number" || typeof h.lon !== "number") return;
+  if (h.gps && navigator.geolocation) {
+    // you used "Use my location" last time: get a fresh fix, fall back to the saved spot
+    setStatus("Getting your location…");
+    navigator.geolocation.getCurrentPosition(
+      pos => run({ name: "your location", lat: pos.coords.latitude, lon: pos.coords.longitude, gps: true }),
+      () => run({ ...h, name: "your last location" }),
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 }
+    );
+  } else {
+    $("placeInput").value = h.name;
+    run(h);
+  }
+}
 
 // ---------- preferences panel ----------
 const WEIGHTS = ["rain", "clouds", "temp", "wind", "waves", "uv"], LIMITS = ["tMin", "tMax", "maxWind", "maxWave", "uvMin", "uvMax"];
@@ -728,6 +765,7 @@ LIMITS.forEach(k => $("p-" + k).addEventListener("change", e => {
 }));
 $("resetPrefs").onclick = () => { prefs = { ...PREF_DEFAULTS }; showPrefs(); rescoreAll(); };
 showPrefs();
+restoreSettings();
 </script>
 </body>
 </html>
