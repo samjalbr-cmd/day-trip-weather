@@ -202,7 +202,7 @@ function wxInfo(code) {
 
 // ---------- scoring (0–100) ----------
 // Preferences: how much each factor matters (0 = ignore, 1 = normal, 3 = a lot) + what counts as ideal.
-const PREF_DEFAULTS = { rain: 1, clouds: 1, temp: 1, wind: 1, waves: 1, tMin: 70, tMax: 88, maxWind: 15, maxWave: 3 };
+const PREF_DEFAULTS = { rain: 3, clouds: 3, temp: 1, wind: 0.25, waves: 0.25, tMin: 80, tMax: 88, maxWind: 15, maxWave: 3 };
 let prefs = { ...PREF_DEFAULTS };
 try { Object.assign(prefs, JSON.parse(localStorage.getItem("prefs") || "{}")); } catch {}
 
