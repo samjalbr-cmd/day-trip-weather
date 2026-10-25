@@ -187,8 +187,9 @@ const chunk = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, 
 
 // WMO weather codes
 function wxInfo(code) {
-  if (code === 0) return ["☀️", "Clear"];
-  if (code <= 2) return ["🌤️", "Partly cloudy"];
+  if (code === 0) return ["☀️", "Sunny"];
+  if (code === 1) return ["🌤️", "Mostly sunny"];
+  if (code === 2) return ["⛅", "Partly cloudy"];
   if (code === 3) return ["☁️", "Overcast"];
   if (code === 45 || code === 48) return ["🌫️", "Fog"];
   if (code >= 51 && code <= 57) return ["🌦️", "Drizzle"];
@@ -424,7 +425,7 @@ async function addDriveTimes(home, places) {
 // ---------- weather ----------
 async function addWeather(places) {
   const daily = "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,uv_index_max";
-  const hourly = "precipitation_probability,cloud_cover";
+  const hourly = "precipitation_probability,cloud_cover,weather_code";
   for (const group of chunk(places, 50)) {
     const lat = group.map(p => p.lat.toFixed(3)).join(","), lon = group.map(p => p.lon.toFixed(3)).join(",");
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=${daily}&hourly=${hourly}` +
@@ -437,11 +438,16 @@ async function addWeather(places) {
         // daytime = 9am–6pm local
         const hrs = H.time.map((t, h) => [t, h]).filter(([t]) => t.startsWith(date) && +t.slice(11, 13) >= 9 && +t.slice(11, 13) <= 18).map(([, h]) => h);
         const avg = key => hrs.length ? hrs.reduce((s, h) => s + (H[key][h] ?? 0), 0) / hrs.length : 0;
+        // Daytime conditions: the daily weather code is the worst hour of the whole day (often
+        // overnight), so build the label from 9am–6pm instead — worst rain/fog hour, else cloud cover.
+        const dayCloud = Math.round(avg("cloud_cover"));
+        const wetCodes = hrs.map(h => H.weather_code[h]).filter(c => c != null && c >= 45);
+        const dayCode = wetCodes.length ? Math.max(...wetCodes) : dayCloud < 20 ? 0 : dayCloud < 45 ? 1 : dayCloud < 75 ? 2 : 3;
         const d = {
-          date, code: D.weather_code[k], hi: D.temperature_2m_max[k], lo: D.temperature_2m_min[k],
+          date, code: hrs.length ? dayCode : D.weather_code[k], hi: D.temperature_2m_max[k], lo: D.temperature_2m_min[k],
           precip: D.precipitation_sum[k] ?? 0, rainMax: D.precipitation_probability_max[k] ?? 0,
           wind: D.wind_speed_10m_max[k] ?? 0, uv: D.uv_index_max[k] ?? 0,
-          rainChance: Math.round(avg("precipitation_probability")), cloud: Math.round(avg("cloud_cover")),
+          rainChance: Math.round(avg("precipitation_probability")), cloud: dayCloud,
         };
         const m = p.marine && p.marine[date];
         d.wave = m ? m.wave : null; d.water = m ? m.water : null;
