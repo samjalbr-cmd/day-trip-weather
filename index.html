@@ -129,7 +129,7 @@
           <div class="nums"><input type="number" id="p-tMin" step="1"> to <input type="number" id="p-tMax" step="1"> °F</div></div>
         <div class="pref"><label>Wind is a problem above</label><div class="nums"><input type="number" id="p-maxWind" step="1"> mph</div></div>
         <div class="pref"><label>Waves are a problem above</label><div class="nums"><input type="number" id="p-maxWave" step="0.5"> ft</div></div>
-        <div class="pref"><label>UV is a problem above</label><div class="nums"><input type="number" id="p-maxUv" step="1" min="1" max="12"> UV</div></div>
+        <div class="pref"><label>Ideal UV index</label><div class="nums"><input type="number" id="p-uvMin" step="1" min="0" max="12"> to <input type="number" id="p-uvMax" step="1" min="0" max="12"></div></div>
       </div>
       <button class="ghost" id="resetPrefs" type="button">Reset to defaults</button>
     </details>
@@ -208,9 +208,9 @@ function wxInfo(code) {
 
 // ---------- scoring (0–100) ----------
 // Preferences: how much each factor matters (0 = ignore, 1 = normal, 3 = a lot) + what counts as ideal.
-const PREF_DEFAULTS = { rain: 3, clouds: 3, temp: 1, wind: 0.25, waves: 0.25, tMin: 80, tMax: 88, maxWind: 15, maxWave: 3, startHour: 9, endHour: 18, uv: 1, maxUv: 8 };
+const PREF_DEFAULTS = { rain: 3, clouds: 3, temp: 1, wind: 0.25, waves: 0.25, tMin: 80, tMax: 88, maxWind: 15, maxWave: 3, startHour: 9, endHour: 18, uv: 1, uvMin: 4, uvMax: 8 };
 let prefs = { ...PREF_DEFAULTS };
-try { Object.assign(prefs, JSON.parse(localStorage.getItem("prefs") || "{}")); } catch {}
+try { Object.assign(prefs, JSON.parse(localStorage.getItem("prefs") || "{}")); delete prefs.maxUv; } catch {}
 
 function scoreDay(d) {
   const P = prefs;
@@ -224,7 +224,9 @@ function scoreDay(d) {
   if (d.hi > P.tMax) temp = Math.min((d.hi - P.tMax) * 1.5, 25);
   const wind = d.wind > P.maxWind ? Math.min((d.wind - P.maxWind) * 1.2, 15) : 0;
   const waves = d.wave != null && d.wave > P.maxWave ? Math.min((d.wave - P.maxWave) * 4, 30) : 0; // beaches only
-  const uv = d.uv != null && d.uv > P.maxUv ? Math.min((d.uv - P.maxUv) * 5, 20) : 0;  // strong sun / sunburn risk
+  let uv = 0;                                                   // outside your ideal UV range
+  if (d.uv != null && d.uv < P.uvMin) uv = Math.min((P.uvMin - d.uv) * 5, 20);
+  if (d.uv != null && d.uv > P.uvMax) uv = Math.min((d.uv - P.uvMax) * 5, 20);
   const pen = rain * P.rain + clouds * P.clouds + temp * P.temp + wind * P.wind + waves * P.waves + uv * P.uv;
   return Math.max(0, Math.min(100, Math.round(100 - pen)));
 }
@@ -685,7 +687,7 @@ $("maxHours").onchange = () => state.home && run(state.home);
 $("mode").onchange = () => state.home && run(state.home);
 
 // ---------- preferences panel ----------
-const WEIGHTS = ["rain", "clouds", "temp", "wind", "waves", "uv"], LIMITS = ["tMin", "tMax", "maxWind", "maxWave", "maxUv"];
+const WEIGHTS = ["rain", "clouds", "temp", "wind", "waves", "uv"], LIMITS = ["tMin", "tMax", "maxWind", "maxWave", "uvMin", "uvMax"];
 const hourLabel = h => h === 0 || h === 24 ? "midnight" : h === 12 ? "noon" : h < 12 ? h + "am" : (h - 12) + "pm";
 ["startHour", "endHour"].forEach(k => {
   const range = k === "startHour" ? [5, 21] : [7, 24];
@@ -714,6 +716,7 @@ LIMITS.forEach(k => $("p-" + k).addEventListener("change", e => {
   if (isNaN(v)) { e.target.value = prefs[k]; return; }
   prefs[k] = v;
   if (prefs.tMin > prefs.tMax) [prefs.tMin, prefs.tMax] = [prefs.tMax, prefs.tMin];
+  if (prefs.uvMin > prefs.uvMax) [prefs.uvMin, prefs.uvMax] = [prefs.uvMax, prefs.uvMin];
   showPrefs(); rescoreSoon();
 }));
 ["startHour", "endHour"].forEach(k => $("p-" + k).addEventListener("change", e => {
